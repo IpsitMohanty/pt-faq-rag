@@ -1,28 +1,45 @@
-# PT FAQ RAG (FastAPI + Chroma + Ollama)
+\# PT FAQ RAG (FastAPI + Chroma + Ollama)
+
+
+
+Local-first RAG FAQ assistant using FastAPI + Chroma + HuggingFace embeddings + Ollama, fronted by a lightweight Node gateway. Includes retrieval guardrails (distance gating, acronym expansion, snippet fallback, and timeout-safe grounded generation).
+
+
 
 Local-first, document-grounded FAQ assistant.
 
-**Backend (`backend/app.py`)**
-- FastAPI API
-- Chroma persistent vector store (persisted locally; ignored in git)
-- HuggingFace embeddings (`sentence-transformers/all-MiniLM-L6-v2`)
-- Ollama local LLM (default `phi3:mini`) for longer answers
-- Guardrails: gibberish detection, unknown-definition guard, distance thresholding, snippet fallback
 
-## Architecture
-Gateway/UI → `POST /chat` → retrieval (Chroma) → either:
-- **Snippet mode** (definitions / procedures / short queries)
-- **LLM synthesis** (grounded by retrieved context; timeout falls back to snippets)
 
-## Repo structure
-```text
-backend/
-  app.py
-  requirements.txt
-  .env.example
-  chroma_store/   # ignored (generated)
-  data/           # ignored (docx lives here locally)
-gateway/
-  server.js
-  package.json
-  package-lock.json
+\## Stack
+
+\- FastAPI
+
+\- Chroma (persistent vector store)
+
+\- HuggingFace sentence-transformers embeddings
+
+\- Ollama (optional, grounded generation)
+
+\- Node/Express gateway (CORS + proxy)
+
+
+
+\## Run (Backend)
+
+
+
+```powershell
+
+cd backend
+
+py -3.11 -m venv .venv
+
+.\\\\.venv\\\\Scripts\\\\Activate.ps1
+
+pip install -r requirements.txt
+
+uvicorn app:app --reload --port 8000
+
+
+
+
