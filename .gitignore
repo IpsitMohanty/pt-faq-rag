@@ -31,4 +31,5 @@ Thumbs.db
 node_modules/
 gateway/node_modules/
 ui/node_modules/
+package-lock.json
 
