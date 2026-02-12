@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+pydantic
+httpx
+
+langchain-chroma
+langchain-community
+langchain-core
+chromadb
+sentence-transformers
