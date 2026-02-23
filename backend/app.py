@@ -127,10 +127,13 @@ POSHAN_TERMS = {
     "registration": "beneficiary registration e-kyc face capture",
 }
 
+# Improved prompt: still strict but more natural, stepwise output
 SYSTEM_PROMPT = (
-    "You are a helpful assistant that answers ONLY from the provided PT FAQ context.\n"
-    "Do NOT add meta commentary.\n"
-    "If the answer is not in the context, say exactly:\n"
+    "You are a helpful assistant for Poshan Tracker FAQs.\n"
+    "Answer using ONLY the provided Context.\n"
+    "Be clear and direct in 2–8 lines. Use bullet points for steps.\n"
+    "Do not mention 'context', 'retrieval', or internal logic.\n"
+    "If the answer is not present, say exactly:\n"
     "\"This information is not available in the PT FAQ document.\""
 )
 
@@ -197,6 +200,34 @@ def is_definition_query(q: str) -> bool:
         or ql.startswith("meaning of ")
         or ql.startswith("full form of ")
     )
+
+
+def is_numbers_intent(q: str) -> bool:
+    ql = (q or "").lower()
+    return any(w in ql for w in ["how many", "maximum", "max", "minimum", "min", "%", "percent", "days", "times"])
+
+
+def looks_like_acronymish(term: str) -> bool:
+    """
+    Short single tokens like frs/rch/abha/otp are treated as acronym-ish.
+    Used only for *definition* guardrails, and only after retrieval.
+    """
+    t = re.sub(r"[^a-zA-Z0-9]", "", (term or "").strip())
+    if not (2 <= len(t) <= 8):
+        return False
+    return t.isalnum()
+
+
+def looks_like_id_or_code(q: str) -> bool:
+    """
+    Ticket IDs / hash-like strings / device refs should not go to RAG.
+    """
+    t = (q or "").strip()
+    if re.fullmatch(r"[A-Za-z0-9_\-]{12,}", t):  # long single token
+        return True
+    if re.fullmatch(r"(err|error|id|ref)[\-_]?[A-Za-z0-9]{6,}", t.lower()):
+        return True
+    return False
 
 
 def maybe_fast_def(q: str) -> Optional[str]:
@@ -392,7 +423,13 @@ def chat(req: ChatRequest):
     if not raw_query:
         return {"answer": "Ask a question.", "sources": []}
 
-    # 0) gibberish guard
+    # 0) Production junk guards
+    if looks_like_id_or_code(raw_query):
+        return {
+            "answer": "I couldn’t understand that. Please rephrase (e.g., 'what is FRS', 'how to do eKYC', 'How many beneficiaries per Aadhaar?').",
+            "sources": [],
+        }
+
     if is_gibberish(raw_query):
         return {
             "answer": "I couldn’t understand that. Please rephrase (e.g., 'what is FRS', 'how to do eKYC', 'THR distribution').",
@@ -403,11 +440,6 @@ def chat(req: ChatRequest):
     fast = maybe_fast_def(raw_query)
     if fast and not is_explainish(raw_query):
         return {"answer": fast, "sources": ["builtin"]}
-
-    # 1.1) unknown definition term guard (e.g., 'what is egov')
-    unknown_term = extract_unknown_term_if_definition(raw_query)
-    if unknown_term and unknown_term not in FAST_DEFS:
-        return {"answer": "This information is not available in the PT FAQ document.", "sources": []}
 
     # 2) Retrieval (robust: try raw + expanded, dynamic gating)
     raw_words = raw_query.split()
@@ -420,19 +452,30 @@ def chat(req: ChatRequest):
     if not docs:
         return {"answer": "This information is not available in the PT FAQ document.", "sources": []}
 
+    best = min(scores) if scores else 999.0
+    max_dist_ok = (MAX_DISTANCE_OK + SHORT_QUERY_DISTANCE_BONUS) if is_short else MAX_DISTANCE_OK
+
     min_chars_needed = 40 if is_short else 220
     if weak_retrieval(docs, min_total_chars=min_chars_needed):
         return {"answer": "This information is not available in the PT FAQ document.", "sources": []}
 
-    best = min(scores) if scores else 999.0
-    max_dist_ok = (MAX_DISTANCE_OK + SHORT_QUERY_DISTANCE_BONUS) if is_short else MAX_DISTANCE_OK
     if best > max_dist_ok:
         return {"answer": "This information is not available in the PT FAQ document.", "sources": []}
 
-    # 3) Snippet mode for:
-    #    - short queries
-    #    - definition/explain questions (gives procedure from FAQ without LLM)
-    if len(raw_words) <= 2 or is_definition_query(raw_query) or is_explainish(raw_query):
+    # 2.1) Retrieval-aware "unknown acronym" guard for definition queries
+    unknown_term = extract_unknown_term_if_definition(raw_query)
+    if unknown_term:
+        term = unknown_term.strip()
+        acronymish = looks_like_acronymish(term) and term.lower() not in FAST_DEFS
+        if acronymish:
+            # extra strict for acronymish defs: must have strong retrieval
+            if weak_retrieval(docs, 160) or best > (max_dist_ok - 0.05):
+                return {"answer": "This information is not available in the PT FAQ document.", "sources": []}
+
+    # 3) Precision snippet mode for:
+    #    - ultra-short queries (1–2 tokens)
+    #    - numbers/limits questions (avoid paraphrase errors)
+    if len(raw_words) <= 2 or is_numbers_intent(raw_query):
         s = snippet_answer(docs, max_docs=2, max_each=900)
         if s:
             return {"answer": s, "sources": top_sources(docs, 1)}
