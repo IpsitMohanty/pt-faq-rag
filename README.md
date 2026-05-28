@@ -59,19 +59,19 @@ Client -> Node gateway -> FastAPI -> Chroma -> Ollama
 
 ## Guardrails
 
-The README mentions several important guardrails, and these are a strong part of the project story:
+The workflow includes several practical guardrails:
 
 - distance gating
-narrow retrieval confidence checks before generation is attempted
+  retrieval confidence checks before generation is attempted
 
 - acronym expansion
-helps queries match domain language more reliably
+  helps queries match domain language more reliably
 
 - snippet fallback
-ensures the system still returns useful evidence when synthesis is not appropriate
+  ensures the system still returns useful evidence when synthesis is not appropriate
 
 - timeout-safe grounded generation
-prevents the user experience from collapsing when the LLM path is slow or unavailable
+  prevents the user experience from collapsing when the LLM path is slow or unavailable
 
 ## Typical Query Behavior
 
@@ -136,8 +136,6 @@ The project assumes:
 - local document content already chunked or ingestible into the vector store
 - optional Ollama availability for grounded synthesis
 
-If the vector store is empty, retrieval quality will be poor regardless of prompt behavior.
-
 ## Example Use Cases
 
 - internal FAQ assistant over operational documents
@@ -145,17 +143,6 @@ If the vector store is empty, retrieval quality will be poor regardless of promp
 - local document-grounded support assistant
 - prototype RAG service with explicit guardrails
 
-## Current Limitations
+## Project Scope
 
-- local-first setup may require manual environment preparation
-- retrieval and generation quality depend on the indexed corpus
-- no claim of production-grade multi-user deployment
-- fallback behavior is safer than free-form generation, but not a substitute for full evaluation
-
-## Suggested Next Improvements
-
-- add ingestion/indexing documentation
-- add request and response examples
-- add architecture diagram or screenshots
-- document the retrieval scoring logic more explicitly
-- add benchmark or evaluation notes for FAQ quality
+This repository is focused on local-first, document-grounded FAQ retrieval and guarded answer generation.
