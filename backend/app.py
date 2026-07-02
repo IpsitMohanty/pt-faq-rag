@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.llms import Ollama
 
 from rapidfuzz import process, fuzz
 
@@ -86,6 +87,7 @@ def tokenize(q: str) -> List[str]:
 
 embeddings: Optional[HuggingFaceEmbeddings] = None
 vectordb: Optional[Chroma] = None
+llm: Optional[Ollama] = None
 
 # ================= FAQ INDEX =================
 
@@ -275,7 +277,7 @@ def vector_retrieve(query: str, k: int = 4) -> Dict[str, Any]:
 
 @app.on_event("startup")
 def startup():
-    global embeddings, vectordb
+    global embeddings, vectordb, llm
     load_faq_index()
     embeddings = HuggingFaceEmbeddings(model_name=EMBED_MODEL)
     vectordb = Chroma(
@@ -284,6 +286,14 @@ def startup():
         embedding_function=embeddings,
     )
     print(f"[VECTOR] ready collection={COLLECTION} persist={PERSIST_DIR}")
+    try:
+        llm = Ollama(model=OLLAMA_MODEL, timeout=OLLAMA_TIMEOUT_S)
+        # Warm-up probe — fails fast if Ollama isn't running
+        llm.invoke("ping")
+        print(f"[LLM] Ollama ready model={OLLAMA_MODEL}")
+    except Exception as e:
+        llm = None
+        print(f"[LLM] Ollama not available ({e}), falling back to direct retrieval")
 
 # ================= ROUTES =================
 
@@ -345,16 +355,32 @@ def chat(req: ChatRequest):
         return {"answer": "This information is not available in the PT FAQ document.", "mode": "not_found"}
 
     top = vr["hits"][0]
-    ans = extract_answer_from_page_content(top["text"])[:2000]  # ✅ longer
+    context = extract_answer_from_page_content(top["text"])
+    debug_info = {
+        "reason": vr["reason"],
+        "best_distance": top["distance"],
+        "matched_question": top["meta"].get("question", ""),
+        "section_path": top["meta"].get("section_path", ""),
+        "tags": top["meta"].get("tags", ""),
+    }
+
+    if llm is not None:
+        try:
+            prompt = (
+                "You are a Poshan Tracker assistant. Answer using ONLY the context below. "
+                "Be concise and accurate.\n\n"
+                f"Question: {raw}\n\n"
+                f"Context: {context}\n\n"
+                "Answer:"
+            )
+            generated = llm.invoke(prompt)
+            log({"rid": rid, "stage": "rag_llm", "model": OLLAMA_MODEL})
+            return {"answer": generated.strip(), "mode": "rag", "debug": debug_info}
+        except Exception as e:
+            log({"rid": rid, "stage": "rag_llm_fallback", "error": str(e)})
 
     return {
-        "answer": ans,
+        "answer": context[:2000],
         "mode": "vector",
-        "debug": {
-            "reason": vr["reason"],
-            "best_distance": top["distance"],
-            "matched_question": top["meta"].get("question", ""),
-            "section_path": top["meta"].get("section_path", ""),
-            "tags": top["meta"].get("tags", ""),
-        }
+        "debug": debug_info,
     }

@@ -6,5 +6,7 @@ httpx
 langchain-chroma
 langchain-community
 langchain-core
+langchain-huggingface
 chromadb
 sentence-transformers
+rapidfuzz
