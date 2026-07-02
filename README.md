@@ -38,24 +38,28 @@ This project addresses those risks with retrieval guardrails and fallback behavi
 
 - FastAPI
 - Chroma persistent vector store
-- HuggingFace sentence-transformers embeddings
-- Ollama for optional grounded generation
+- HuggingFace `sentence-transformers/all-MiniLM-L6-v2` embeddings
+- Ollama for grounded generation (`phi3:mini` by default, configurable via `OLLAMA_MODEL`)
 - Node / Express gateway for proxying and CORS handling
 
 ## Architecture
 
-Client -> Node gateway -> FastAPI -> Chroma -> Ollama
+Client -> Node gateway -> FastAPI -> Chroma -> Ollama (when available)
 
-### Request flow
+### Request pipeline
 
-1. A client sends a query to the Node gateway.
-2. The gateway forwards the request to the FastAPI backend.
-3. The backend embeds the query and retrieves candidate chunks from Chroma.
-4. Guardrails inspect retrieval quality.
-5. Depending on the query and retrieval strength:
-   - direct snippets are returned, or
-   - grounded synthesis is requested from Ollama
-6. If generation times out or fails quality checks, the system falls back to snippets.
+Each query passes through these stages in order, short-circuiting at the first hit:
+
+1. **Acronym rewrite** — bare terms like `frs` expand to `What is FRS in Poshan Tracker?` before any lookup
+2. **Query canonicalization** — colon/dash follow-up patterns (`registration: ekyc steps`) map to a canonical question
+3. **Fuzzy correction** — token-level rapidfuzz matching against known domain terms
+4. **Exact FAQ lookup** — normalized match against a pre-built `faq_index.json`; returns `mode: "faq_exact"`
+5. **Clarification prompt** — broad single-topic queries (e.g. bare `registration`) return an options list instead of guessing
+6. **Vector retrieval** — Chroma cosine similarity with distance gating; threshold relaxed slightly for short queries with a hard cap
+7. **LLM generation** — retrieved chunk is passed to Ollama with a grounded prompt; returns `mode: "rag"`
+8. **Retrieval fallback** — if Ollama is not running or times out, the top vector chunk is returned directly as `mode: "vector"`
+
+Ollama is probed at startup. If it is not reachable, the service logs a warning and operates in retrieval-only mode automatically — no configuration change needed.
 
 ## Guardrails
 
@@ -73,16 +77,17 @@ The workflow includes several practical guardrails:
 - timeout-safe grounded generation
   prevents the user experience from collapsing when the LLM path is slow or unavailable
 
-## Typical Query Behavior
+## Response Modes
 
-- **Short, precise questions**
-  usually return direct document snippets
+Every `/chat` response includes a `mode` field indicating which pipeline stage answered:
 
-- **Longer or more interpretive questions**
-  may use grounded LLM synthesis when retrieval is strong enough
-
-- **Weak retrieval or generation timeout**
-  falls back to supporting snippets instead of guessing
+| `mode` | Meaning |
+|---|---|
+| `faq_exact` | Matched a pre-indexed FAQ entry exactly |
+| `clarify` | Query was too broad; response includes options to narrow it |
+| `rag` | Ollama generated an answer grounded in the retrieved chunk |
+| `vector` | Ollama unavailable; top retrieved chunk returned directly |
+| `not_found` | No chunk within the distance threshold |
 
 ## Repository Role
 
