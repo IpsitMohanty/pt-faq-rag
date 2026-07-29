@@ -2,7 +2,7 @@
 
 Local-first FAQ assistant built with **FastAPI**, **Chroma**, **HuggingFace embeddings**, **Ollama**, and a lightweight **Node gateway**.
 
-The system is designed to answer document-grounded FAQ queries with retrieval guardrails, fallback behavior, and a simple API-first architecture.
+The system is designed to answer document-grounded FAQ queries with retrieval guardrails, fallback behavior, and a simple API-first architecture. This repo is the **serving/deployment** side of the same domain [`rag-ingestion-evaluation`](https://github.com/IpsitMohanty/rag-ingestion-evaluation) evaluates: that repo asks whether a retriever can be trusted to know when it doesn't know; this one is what running a guarded retrieval service in front of an LLM actually looks like once you've decided to ship one anyway -- exact-match short-circuits, distance gating, and a documented fallback path when generation isn't available, rather than a retrieval-evaluation study.
 
 ## What This Project Does
 
@@ -111,6 +111,21 @@ uvicorn app:app --reload --port 8000
 ```
 
 If your backend entrypoint differs, replace `app:app` with the correct module path.
+
+## Tests
+
+```bash
+cd backend
+pip install -r requirements.txt pytest
+pytest tests/ -v
+```
+
+16 smoke tests at the service's seams, not an evaluation suite -- no real Chroma, HuggingFace, or Ollama required, since the FastAPI startup event is never triggered and the vector store / LLM are set directly on the module where a test needs specific behavior:
+
+- the pure query-normalization and canonicalization functions (`normalize_text`, `parse_followup`, `canonicalize`, `maybe_rewrite_acronym`)
+- `/health` responds without any backend running
+- `/chat`'s three documented guardrail paths: an exact FAQ match short-circuits before vector retrieval, a bare broad query (`registration`) returns a clarification prompt instead of guessing, and an unmatched query degrades to `not_found` rather than raising when no vector store is available
+- `vector_retrieve`'s distance-gating boundary, against a fake vector store standing in for Chroma
 
 ## Running the Gateway
 
